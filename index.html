@@ -22,28 +22,22 @@
         height: 100%;
         overflow: hidden;
       }
-      /* Hide likely fullscreen controls (IDs, classes, or labeled buttons/anchors) */
-      #unity-fullscreen-button,
-      .unity-fullscreen-button,
-      #fullscreen,
-      .fullscreen,
-      button[title="Fullscreen"],
-      [aria-label="Fullscreen"],
-      [data-action="fullscreen"],
-      button[title*="Full"],
-      button[aria-label*="Full"],
-      .fs-btn,
-      .full-screen,
-      .btn-fullscreen {
+
+      /* HARD HIDE the specific fullscreen icon and its clickable parent */
+      svg.svg-inline--fa.fa-expand,
+      svg[data-icon="expand"] {
         display: none !important;
         visibility: hidden !important;
         pointer-events: none !important;
       }
-      /* Common bottom-right utility class patterns */
-      .bottom-right,
-      .br,
-      .controls .fullscreen,
-      .controls .btn-fullscreen {
+
+      /* Hide common clickable wrappers that contain the expand icon */
+      button:has(svg.svg-inline--fa.fa-expand),
+      a:has(svg.svg-inline--fa.fa-expand),
+      [role="button"]:has(svg.svg-inline--fa.fa-expand),
+      button:has(svg[data-icon="expand"]),
+      a:has(svg[data-icon="expand"]),
+      [role="button"]:has(svg[data-icon="expand"]) {
         display: none !important;
         visibility: hidden !important;
         pointer-events: none !important;
@@ -54,7 +48,7 @@
     <div id="root"></div>
 
     <svg>
-      <filter id="glow-filter">
+      <filter id="glow-filter" >
         <feColorMatrix color-interpolation-filters="sRGB" in="SourceGraphic" type="matrix"
           values="1 0 0 0 -0.5
                   0 1 0 0 -0.5
@@ -100,72 +94,64 @@
 
     <div id="loading-spinner" class="loader">Loading...</div>
 
-    <!-- Runtime removal + handler neutralization -->
+    <!-- Robust runtime removal (covers late-injected controls) -->
     <script>
-      (function removeFullscreenControls() {
-        const selectors = [
-          '#unity-fullscreen-button',
-          '.unity-fullscreen-button',
-          '#fullscreen',
-          '.fullscreen',
-          '[title="Fullscreen"]',
-          '[aria-label="Fullscreen"]',
-          '[data-action="fullscreen"]',
-          'button[title*="Full"]',
-          'button[aria-label*="Full"]',
-          '.fs-btn',
-          '.full-screen',
-          '.btn-fullscreen',
-          '.bottom-right',
-          '.br',
-          '.controls .fullscreen',
-          '.controls .btn-fullscreen'
-        ].join(',');
-
-        const nuke = () => {
-          document.querySelectorAll(selectors).forEach(el => {
-            try {
-              el.remove();
-            } catch {
-              el.style.display = 'none';
-              el.style.visibility = 'hidden';
-              el.style.pointerEvents = 'none';
-            }
-          });
-        };
-
-        // Run now, on DOM ready, and a few times after to catch late injections
-        nuke();
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', () => { nuke(); setTimeout(nuke, 0); setTimeout(nuke, 100); });
-        } else {
-          setTimeout(nuke, 0);
-          setTimeout(nuke, 100);
+      (function killExpandFullscreenEverywhere() {
+        function hideOrRemove(el) {
+          try { el.remove(); }
+          catch {
+            el.style.display = 'none';
+            el.style.visibility = 'hidden';
+            el.style.pointerEvents = 'none';
+            el.setAttribute('hidden', '');
+            el.innerHTML = '';
+          }
         }
 
-        // Observe for dynamically injected controls (from bundle.js)
-        const mo = new MutationObserver(() => nuke());
-        mo.observe(document.documentElement, { childList: true, subtree: true });
+        function sweep(root = document) {
+          // Remove the exact icon(s)
+          root.querySelectorAll('svg.svg-inline--fa.fa-expand, svg[data-icon="expand"]').forEach(svg => {
+            const parent = svg.closest('button, a, [role="button"], div');
+            hideOrRemove(parent || svg);
+          });
 
-        // Soft-block direct fullscreen API calls triggered by buttons
-        const blockList = ['requestFullscreen','webkitRequestFullscreen','mozRequestFullScreen','msRequestFullscreen'];
-        blockList.forEach(fn => {
-          const proto = Element.prototype;
-          if (fn in proto) {
-            try {
-              Object.defineProperty(proto, fn, { value: function(){ /* blocked */ }, configurable: true });
-            } catch {}
-          }
-          const docProto = Document.prototype;
-          if (fn in docProto) {
-            try {
-              Object.defineProperty(docProto, fn, { value: function(){ /* blocked */ }, configurable: true });
-            } catch {}
+          // Extra: sometimes the icon is wrapped in multiple layers; walk up a bit
+          root.querySelectorAll('svg.svg-inline--fa.fa-expand, svg[data-icon="expand"]').forEach(svg => {
+            let p = svg.parentElement, hops = 0;
+            while (p && hops < 3) {
+              if (getComputedStyle(p).cursor === 'pointer' || ['BUTTON','A'].includes(p.tagName) || p.getAttribute('role') === 'button') {
+                hideOrRemove(p);
+                break;
+              }
+              p = p.parentElement; hops++;
+            }
+          });
+        }
+
+        // Initial + staged sweeps
+        sweep();
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => { sweep(); setTimeout(sweep, 0); setTimeout(sweep, 100); });
+        } else {
+          setTimeout(sweep, 0);
+          setTimeout(sweep, 100);
+        }
+
+        // Mutation observer for anything injected later by the app
+        const mo = new MutationObserver(muts => {
+          for (const m of muts) {
+            m.addedNodes && m.addedNodes.forEach(n => n.nodeType === 1 && sweep(n));
           }
         });
+        mo.observe(document.documentElement, { childList: true, subtree: true });
+
+        // Belt-and-suspenders: periodic sweeps for 30s
+        const interval = setInterval(sweep, 1000);
+        setTimeout(() => clearInterval(interval), 30000);
       })();
     </script>
 
     <script type="text/javascript" src="bundle.js"></script>
   </body>
 </html>
+```
